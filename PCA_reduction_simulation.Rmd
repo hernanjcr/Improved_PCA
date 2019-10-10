@@ -1,0 +1,228 @@
+---
+title: An improvement in PCA application
+subtitle: PCA reduction simulation
+titlerunning: An improvement in PCA application
+authorrunning: Hernan J. Cervantes and Said R. Rabbani
+thanks: |
+    Supplementary documentation for article: "An improvement in PCA application"
+    submited to publication on :
+author: 
+- name: Hernán Joel Cervantes
+  address: Instituto de Física da Universidade de São Paulo
+  email: hernan@if.usp.br
+- name: Said R. Rabbani
+  address: Instituto de Física da Universidade de São Paulo
+  email: srabbani@if.usp.br
+abstract: |
+ This supplementary documentation includes a R code, \cite{RManual} shown the effect of
+ linear relationship between variables in multidimensional data and who the autovalue
+ and autovector can be used to take off these variables.
+keywords:
+- Multivariate analysis
+- Dimensional reduction
+- PCA
+- Metabolomics
+#PACS: 
+#- PAC1
+#- superPAC
+bibliography: article.bib
+csl: elsevier-harvard.csl
+output: rticles::springer_article
+---
+
+# PCA reduction simulation
+
+First load required libraries and codes
+```{r, loadingRequiredLibraries, results='hide'}
+require(MASS)
+require(ggplot2)
+require(ggbiplot)
+require(ggforce)
+require(reshape)
+```
+
+Setting initial random state
+```{r, initialSet}
+set.seed(54321)
+```
+
+Procedure following the example published in stackexchange, \cite{stackexchangePCA}, where:
+
+$nVars=$ number of variables
+
+$rot   =$ random rotation matrix
+
+$n1    =$ number of samples in group 1
+
+$n2    =$ number of samples in group 2
+
+$eps   =$ Error SD should be small compared to the SDs
+
+$x     =$ simulated data
+
+$y     =$ rotated simulated data
+```{r}
+nVars <- 5
+rot <- qr.Q(qr(matrix(rnorm(nVars*nVars), nVars)))
+sigma <- function(theta=0, lambda=c(1,1)) {
+   cos.t <- cos(theta);
+   sin.t <- sin(theta)
+   a <- matrix(c(cos.t, sin.t, -sin.t, cos.t), ncol=2)
+   t(a) %*% diag(lambda) %*% a
+}
+
+n1 <- 50
+n2 <- 75
+x <- rbind(mvrnorm(n1, c(-2,-1), sigma(0, c(1/2,1))),
+           mvrnorm(n2, c(0,1), sigma(pi/3, c(1, 1/3))))
+eps <- 0.25
+x <- cbind(x, matrix(rnorm(dim(x)[1]*(nVars-2), sd=eps),
+                     ncol=nVars-2))
+y <- x %*% rot
+
+colnames(y) <- paste(rep("X", 5), 1:5, sep='')
+row.names(y) <- c(paste(rep("S", n1), 1:n1, sep=""),
+                  paste(rep("R",n2), 1:n2, sep=""))
+groups <- as.factor(c(rep("group1", n1), rep("group2",n2)))
+```
+
+Plotting the original data. The ellipse corresponde to the standard deviation of multinormal random samples.
+```{r fig.cap="Original simulated data before rotation. The ellipses shown the scattering of each sample."}
+xdf <- data.frame(x)
+ggplot(data=xdf, aes(x=X1, y=X2, color=groups, shape=groups)) +
+  geom_point() + theme(legend.direction="horizontal",
+                       legend.position="top") +
+  geom_ellipse(aes(x0=-2,y0=-1,b=1/2,a=1,angle=0),colour="red") +
+  geom_ellipse(aes(x0=0,y0=1,b=1,a=1/3,angle=pi/3),
+               colour="cyan") + coord_fixed()
+```
+
+Processing the newly simulated data using PCA. The reduced transformed data is plotted to compare with the previous graph.
+```{r, PCAsimY, fig.cap="Biplot of the simulated data $y$"}
+pcaSim <- prcomp(y, center = TRUE, scale. = TRUE)
+
+pcaSim.g <- ggbiplot(pcaSim, obs.scale=1, var.scale=1,
+                     groups=groups, ellipse=TRUE, var.axes = FALSE) +
+    scale_color_discrete(name="")  +
+    theme(legend.direction="horizontal", legend.position="top")
+print(pcaSim.g)
+```
+
+Additing variables with linear combination of previously created data:
+
+$X6 = 1.0\times X1 + 2.0\times X2$
+
+$X7 = -0.5\times X3 + 0.25\times X4$
+
+$yLin$ is the previous data set including two new variables, which are a linear combination of other columns.
+```{r}
+yLin <- y
+yLin <- cbind(yLin, 1.0*y[,1] + 2.0*y[,2])
+yLin <- cbind(yLin, -0.5*y[,3] + 0.25*y[,4])
+colnames(yLin) <- paste(rep("X", 7), 1:7, sep='')
+```
+
+Processing, as before, this newly data frame.
+```{r, PCAsimTotal, fig.cap="Biplot of the simulated data including two columns with linear relationship."}
+pcaLin <- prcomp(yLin, center = TRUE, scale. = TRUE)
+
+cat('\nEigenvalues for the initial simulated data :\n')
+cat(pcaSim$sdev^2)
+cat('\nAfter linear combination of some columns:\n')
+cat(pcaLin$sdev^2)
+
+pltdf <- data.frame(PC=c(1:5,1:7),
+                    y=c(pcaSim$sdev^2/max(pcaSim$sdev^2),
+                        pcaLin$sdev^2/max(pcaLin$sdev^2)),
+                    clase=as.factor(c(rep('Original',5),
+                                      rep('Linear vars.',7))))
+pcaSim.sc <- ggplot(pltdf, aes(PC,y,color=clase)) + geom_line() +
+  geom_point() + scale_color_discrete(name="") +
+  theme(legend.direction="horizontal",legend.position="top") +
+  xlab('principal component number') +
+  ylab('proportion of explained variance') +
+  scale_shape_manual("", values=c(19,15))
+print(pcaSim.sc)
+```
+
+Searching by columns with linear combinations as some eigenvalues are quasi-zero.
+There are two approach: First, follow the book of Jolliffe, \cite[page 27]{Jolliffe}  and of Härdle and Simar, \cite[page 284]{hardle2012}.
+
+There are two small eigenvalues (6th and 7th). Calculing the values of the eigenvectors divided by the standard deviation and the correlation between variable $X_i$ and the normalized principal component (NPC)  $Z_j$, as, the options "center" and "scale." are being used:
+
+$$
+r_{X_iZ_j} = \sqrt{l_j}g_{R,ij},
+$$
+
+where, $g_{ij}$ are the componentes of the $j$th eigenvector, $l_j$ is the $j$th eigenvalue.
+```{r}
+cat('The coefficients in the corresponding PC are:\n')
+round(pcaLin$rotation[,6:7]/pcaLin$scale, digits = 2)
+cat('The variable with the highest coefficient, in absolute value,
+    is "X7"; as previously established X7 <- -0.5 * X3 + 0.25 * X4\n')
+cat('From Härle and Simar book, calculating the correlation
+    between variables and the respective PC :\n')
+CorYpY <- pcaLin$rotation[,6:7]*
+  matrix(pcaLin$sdev[6:7], nrow(pcaLin$rotation), 2, byrow=TRUE)
+round(apply(CorYpY, 2, function(x){return (x/max(abs(x)))}), digits=3)
+```
+
+Removing the identified columns with highest coefficiente and recalculing the PCA.
+
+```{r, PCAwithout7, fig.cap="Biplot of PCA without the variable X7."}
+pcaLin <- prcomp(yLin[,-7], center = TRUE, scale. = TRUE)
+cat('\nThe new eigenvalues are :\n')
+cat(pcaLin$sdev^2)
+pcaSim.sc <- pcaSim.sc + geom_point(data =
+data.frame(x2=1:6,y2=pcaLin$sdev^2/max(pcaLin$sdev^2),
+           clase=rep('without X7',6)),
+aes(x=x2,y=y2,colour=clase))
+print(pcaSim.sc)
+cat('\nThe coefficients for the 6th PC are now:\n')
+round(pcaLin$rotation[,6]/pcaLin$scale, digits = 2)
+```
+In this case, the linear relationship can be clearly observed.
+Remembering that $X6 = 1.0\times X1 + 2.0\times X2$ or $0 = -X6 + X1 + 2\times X2$,
+which can be write as
+$$
+1\times X1 + 2\times X2 + 0\times X3 + 0\times X4 + 0\times X5 + (-1)\times X6 = 0
+$$
+equal to the coefficients of the 6th PC, dividided by 0.24.
+
+```{r}
+cat('The Correlation of the variables to this PC is\n')
+CorYpY2 <- pcaLin$rotation[,6]*pcaLin$sdev[6]
+round(CorYpY2/max(abs(CorYpY2)), digits=3)
+```
+
+
+```{r}
+cat('Eleminating the 2th variable, variable with the greatest
+    coefficient, and recalculating the PCA:')
+pcaLin <- prcomp(yLin[,-c(2,7)], center = TRUE, scale. = TRUE)
+cat('\nThe new eigenvalues are now:\n')
+cat(pcaLin$sdev^2)
+cat('\nNow the lowest eigenvalue is 5% of the highest, that is,
+    there is no linear relationship between the remaining variables.')
+pcaSim.sc <- pcaSim.sc + geom_point(data =
+data.frame(x2=1:5,y2=pcaLin$sdev^2/max(pcaLin$sdev^2),
+           clase=rep('Without X7 and X2',5)),
+aes(x=x2,y=y2, colour=clase))
+print(pcaSim.sc)
+```
+
+Note that in the previous screeplot, the initial and the final eigenvalues coincide, despite the fact that a variable $X2$ was removed instead of $X6$.
+
+Ploting the final PCA.
+```{r}
+pcaSim.final.g <- ggbiplot(pcaLin, obs.scale=1, var.scale=1,
+                           groups=groups,
+                           ellipse=TRUE, var.axes = FALSE) +
+                  scale_color_discrete(name="")  +
+                  theme(legend.direction="horizontal",
+                        legend.position="top")+
+                  ggtitle('PCA with linear relationships removed')
+print(pcaSim.final.g)
+```
+
+# References
